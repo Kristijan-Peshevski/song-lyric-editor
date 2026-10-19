@@ -5,3 +5,6 @@ outputs/
 *.egg-info/
 .env
 .idea/
+ACE-Step-1.5/.venv/
+ACE-Step-1.5/checkpoints/
+outputs/
