@@ -1,0 +1,12 @@
+gradio>=4.44.0
+faster-whisper>=1.0.3
+demucs>=4.0.1
+torch
+torchaudio
+librosa>=0.10.2
+soundfile>=0.12.1
+numpy>=1.26.0
+scipy>=1.11.0
+yt-dlp>=2024.8.0
+edge-tts>=6.1.12
+pydub>=0.25.1
