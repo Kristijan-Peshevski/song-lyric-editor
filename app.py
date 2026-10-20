@@ -15,9 +15,10 @@ from typing import Any
 import gradio as gr
 
 from lyric_edit.backends import BACKENDS
+from lyric_edit.backends.ace_step import resolve_ace_step_root
 from lyric_edit.config import WHISPER_MODEL
 from lyric_edit.ingest import download_from_url, save_upload
-from lyric_edit.replace import apply_word_replacements
+from lyric_edit.replace import apply_full_text_replacement, apply_word_replacements
 from lyric_edit.separate import separate_stems
 from lyric_edit.transcribe import transcribe_words, words_from_dicts, words_to_table
 
@@ -28,9 +29,8 @@ def _backend_choices() -> list[str]:
 
 def _default_backend() -> str:
     """Prefer ACE-Step only when its local helper is ready to run."""
-    ace_root = os.environ.get("ACE_STEP_ROOT")
-    if ace_root:
-        ace_path = Path(ace_root)
+    ace_path = resolve_ace_step_root()
+    if ace_path:
         ace_python = ace_path / ".venv" / "Scripts" / "python.exe"
         if (
             ace_path.is_dir()
@@ -42,16 +42,11 @@ def _default_backend() -> str:
 
 
 def _ace_step_info() -> str:
-    ace_root = os.environ.get("ACE_STEP_ROOT")
-    if not ace_root:
-        return (
-            "Not configured in this process. Set `ACE_STEP_ROOT` before starting "
-            "`python app.py`; the project also needs `scripts\\lyric_edit_cli.py`."
-        )
-    helper = Path(ace_root) / "scripts" / "lyric_edit_cli.py"
-    ace_python = Path(ace_root) / ".venv" / "Scripts" / "python.exe"
-    if not Path(ace_root).is_dir():
-        return f"`ACE_STEP_ROOT` does not exist: `{ace_root}`."
+    ace_path = resolve_ace_step_root()
+    if ace_path is None:
+        return "ACE-Step was not found beside the project and ACE_STEP_ROOT is not set."
+    helper = ace_path / "scripts" / "lyric_edit_cli.py"
+    ace_python = ace_path / ".venv" / "Scripts" / "python.exe"
     if not helper.is_file():
         return f"ACE_STEP_ROOT is set, but the required helper is missing: `{helper}`."
     if not ace_python.is_file():
@@ -140,7 +135,9 @@ def analyze_song(
 
 def render_edit(
     state: dict[str, Any],
+    edit_mode: str,
     replacement_rows: list[list[Any]] | None,
+    full_text: str,
     backend: str,
 ) -> tuple[str, str | None, str | None]:
     if not state.get("words"):
@@ -148,36 +145,48 @@ def render_edit(
 
     try:
         words = words_from_dicts(state["words"])
-        replacements: list[tuple[int, str]] = []
-        for row_number, row in enumerate(replacement_rows or [], start=1):
-            if len(row) < 2:
-                continue
-            index_value, text_value = row[0], row[1]
-            if index_value in (None, "") and not str(text_value or "").strip():
-                continue
-            if index_value in (None, ""):
-                raise ValueError(f"Replacement row {row_number} has no word index.")
-            replacements.append((int(index_value), str(text_value or "")))
-        if not replacements:
-            raise ValueError("Add at least one word replacement.")
-
-        session = Path(state["session"])
-        edited_vocals, final_mp3 = apply_word_replacements(
-            vocals_path=Path(state["vocals"]),
-            instrumental_path=Path(state["instrumental"]),
-            words=words,
-            replacements=replacements,
-            work_dir=session,
-            backend_name=backend,
-        )
-
-        changes = "\n".join(
-            f"- **#{index}** `{words[index].text}` → `{text.strip()}` "
-            f"({words[index].start:.2f}s–{words[index].end:.2f}s)"
-            for index, text in replacements
-        )
+        if edit_mode == "Replace entire lyric text":
+            edited_vocals, final_mp3 = apply_full_text_replacement(
+                vocals_path=Path(state["vocals"]),
+                instrumental_path=Path(state["instrumental"]),
+                words=words,
+                new_text=full_text,
+                work_dir=Path(state["session"]),
+                backend_name=backend,
+            )
+            changes = (
+                f"Replaced the full analyzed vocal interval "
+                f"({words[0].start:.2f}s–{words[-1].end:.2f}s) "
+                f"with {len(full_text.split())} words."
+            )
+        else:
+            replacements: list[tuple[int, str]] = []
+            for row_number, row in enumerate(replacement_rows or [], start=1):
+                if len(row) < 2:
+                    continue
+                index_value, text_value = row[0], row[1]
+                if index_value in (None, "") and not str(text_value or "").strip():
+                    continue
+                if index_value in (None, ""):
+                    raise ValueError(f"Replacement row {row_number} has no word index.")
+                replacements.append((int(index_value), str(text_value or "")))
+            if not replacements:
+                raise ValueError("Add at least one word replacement.")
+            edited_vocals, final_mp3 = apply_word_replacements(
+                vocals_path=Path(state["vocals"]),
+                instrumental_path=Path(state["instrumental"]),
+                words=words,
+                replacements=replacements,
+                work_dir=Path(state["session"]),
+                backend_name=backend,
+            )
+            changes = "\n".join(
+                f"- **#{index}** `{words[index].text}` → `{text.strip()}` "
+                f"({words[index].start:.2f}s–{words[index].end:.2f}s)"
+                for index, text in replacements
+            )
         summary = (
-            f"Replaced {len(replacements)} word(s) using `{backend}`:\n{changes}\n\n"
+            f"{changes}\nUsing `{backend}`.\n\n"
             f"Edited vocals: `{edited_vocals.name}`\nFull mix: `{final_mp3.name}`"
         )
         state["last_output"] = str(final_mp3)
@@ -233,6 +242,11 @@ def build_ui() -> gr.Blocks:
                 "Large-v3 downloads several GB and needs substantial RAM/VRAM."
             )
             gr.Markdown(_ace_step_info())
+            edit_mode = gr.Radio(
+                ["Individual word rows", "Replace entire lyric text"],
+                value="Individual word rows",
+                label="Edit mode",
+            )
             replacements = gr.Dataframe(
                 headers=["Word index", "New word or short phrase"],
                 datatype=["number", "str"],
@@ -243,6 +257,12 @@ def build_ui() -> gr.Blocks:
                 label="Replacements",
             )
             add_replacement = gr.Button("+ Add another word")
+            full_text = gr.Textbox(
+                label="Replacement lyric text",
+                placeholder="Paste the complete replacement lyric here...",
+                lines=8,
+                visible=False,
+            )
             backend = gr.Dropdown(
                 _backend_choices(),
                 value=_default_backend(),
@@ -268,9 +288,17 @@ def build_ui() -> gr.Blocks:
             replacements,
             replacements,
         )
+        edit_mode.change(
+            lambda mode: (
+                gr.update(visible=mode == "Individual word rows"),
+                gr.update(visible=mode == "Replace entire lyric text"),
+            ),
+            edit_mode,
+            [replacements, full_text],
+        )
         edit_btn.click(
             render_edit,
-            [state, replacements, backend],
+            [state, edit_mode, replacements, full_text, backend],
             [edit_status, out_song, out_vocals],
         )
 

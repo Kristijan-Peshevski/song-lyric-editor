@@ -9,6 +9,39 @@ from lyric_edit.merge import mix_vocals_instrumental
 from lyric_edit.transcribe import WordSpan
 
 
+def apply_full_text_replacement(
+    *,
+    vocals_path: Path,
+    instrumental_path: Path,
+    words: list[WordSpan],
+    new_text: str,
+    work_dir: Path,
+    backend_name: str = "melody_guided",
+) -> tuple[Path, Path]:
+    """Replace the complete analyzed vocal interval with new lyric text."""
+    if not words:
+        raise ValueError("No analyzed words are available.")
+    if not new_text.strip():
+        raise ValueError("Replacement lyric text is empty.")
+
+    backend = BACKENDS.get(backend_name)
+    if backend is None:
+        raise ValueError(f"Unknown backend: {backend_name}")
+
+    full_interval = WordSpan(
+        index=-1,
+        text=" ".join(word.text for word in words),
+        start=words[0].start,
+        end=words[-1].end,
+    )
+    edited_vocals = backend.replace_word(
+        vocals_path, full_interval, new_text.strip(), work_dir
+    )
+    final_mp3 = work_dir / "edited_song.mp3"
+    mix_vocals_instrumental(instrumental_path, edited_vocals, final_mp3)
+    return edited_vocals, final_mp3
+
+
 def apply_word_replacements(
     *,
     vocals_path: Path,

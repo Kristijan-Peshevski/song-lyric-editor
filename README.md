@@ -8,7 +8,7 @@ This is the inverse of your old **VoiceSwapApp** (same song, new voice). Here th
 
 1. **Import** — Upload MP3/WAV, or paste a YouTube URL (via `yt-dlp`; use only content you have rights to).
 2. **Analyze** — Demucs splits **vocals** / **instrumental**; Faster-Whisper transcribes with **word timestamps**.
-3. **Edit** — Add replacement rows with the `+` button; each row selects a word index and its replacement.
+3. **Edit** — Add replacement rows with the `+` button, or switch to **Replace entire lyric text** and paste a complete replacement.
 4. **Render** — Replaces that slice in the vocal stem, then mixes back to a full song.
 
 The `melody_guided` engine is a lightweight fallback: it synthesizes the new text with [Edge TTS](https://github.com/rany2/edge-tts), then **time-stretches** and **pitch-shifts** it to match the original word’s duration and median pitch. It does **not** clone the singer and must not be used when an identical voice is required.
@@ -81,8 +81,10 @@ The complete command sequence from the installation session was:
 (.venv) PS C:\Users\Kristijan\Documents\SongLyricEditor> python app.py
 ```
 
-Keep the same PowerShell window open when starting `app.py`, because
-`$env:ACE_STEP_ROOT` only applies to the current process and its child processes.
+`ACE_STEP_ROOT` is optional when the checkout is located at
+`SongLyricEditor\ACE-Step-1.5`; the app detects that folder automatically. If you use a
+different location, set `ACE_STEP_ROOT` in the same PowerShell window that starts `app.py`,
+because environment variables are process-local.
 The first ACE-Step edit downloads model checkpoints automatically. The model is several
 GB and requires substantial RAM; GPU acceleration requires a working NVIDIA driver and
 `torch.cuda.is_available()` to return `True`.
@@ -107,6 +109,13 @@ The app selects ACE-Step only when `ACE_STEP_ROOT`, its `.venv`, and
 `scripts\lyric_edit_cli.py` exist. The SongLyricEditor adapter calls ACE-Step 1.5's
 real `repaint` inference task for the selected interval. The fallback is not the
 original singer's voice.
+
+### Replace the complete lyric text
+
+Select **Replace entire lyric text** in the Edit tab and paste the complete replacement
+lyrics. The app sends the full analyzed vocal interval and the complete text to the
+selected backend, so the replacement may contain more or fewer words than the
+transcription. This is a full-interval repaint, not a word-by-word timing edit.
 
 ## Tips for believable edits
 

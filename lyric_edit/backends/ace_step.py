@@ -11,6 +11,17 @@ from lyric_edit.backends.base import ReplacementBackend
 from lyric_edit.transcribe import WordSpan
 
 
+def resolve_ace_step_root() -> Path | None:
+    """Use the environment override or the checkout beside this project."""
+    configured = os.environ.get("ACE_STEP_ROOT")
+    candidates = [Path(configured)] if configured else []
+    candidates.append(Path(__file__).resolve().parents[2] / "ACE-Step-1.5")
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
 class AceStepBackend(ReplacementBackend):
     name = "ace_step"
     description = "ACE-Step repaint lyric edit — requires local ACE-Step 1.5"
@@ -22,18 +33,11 @@ class AceStepBackend(ReplacementBackend):
         new_text: str,
         work_dir: Path,
     ) -> Path:
-        ace_root = os.environ.get("ACE_STEP_ROOT")
-        if not ace_root:
+        ace_path = resolve_ace_step_root()
+        if ace_path is None:
             raise RuntimeError(
-                "ACE-Step was selected, but ACE_STEP_ROOT is not set in the process "
-                "running app.py. In the same PowerShell window, run "
-                '$env:ACE_STEP_ROOT = "C:\\path\\to\\ACE-Step" before python app.py.'
-            )
-        ace_path = Path(ace_root)
-        if not ace_path.is_dir():
-            raise RuntimeError(
-                f"ACE_STEP_ROOT does not exist: {ace_path}. "
-                "Set it to the root of your ACE-Step checkout."
+                "ACE-Step was selected, but no installation was found. Expected "
+                "ACE-Step-1.5 beside SongLyricEditor or ACE_STEP_ROOT pointing to it."
             )
 
         job = {
@@ -60,7 +64,7 @@ class AceStepBackend(ReplacementBackend):
             subprocess.run(
                 [str(ace_python), str(helper), str(job_path), str(work_dir)],
                 check=True,
-                cwd=ace_root,
+                cwd=ace_path,
             )
             candidate = work_dir / "vocals_edited.wav"
             if candidate.is_file():
